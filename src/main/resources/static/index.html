@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Realtime Chat</title>
+    <style>
+        :root { --bg: #f6f7f9; --panel: #fff; --text: #1c2024; --muted: #6b7280; --accent: #2563eb; --border: #e5e7eb; }
+        @media (prefers-color-scheme: dark) {
+            :root { --bg: #111418; --panel: #1b1f24; --text: #e6e8eb; --muted: #9aa3ad; --accent: #60a5fa; --border: #2b3138; }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 15px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+        main { max-width: 760px; margin: 0 auto; padding: 16px; }
+        section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+        h1 { font-size: 20px; margin: 4px 0 12px; }
+        input, select, button { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+        button { background: var(--accent); color: #fff; border: none; cursor: pointer; }
+        .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+        .row > input { flex: 1; min-width: 140px; }
+        #log { height: 340px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+        .msg { margin: 4px 0; } .who { font-weight: 600; } .meta { color: var(--muted); font-size: 12px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Realtime Chat</h1>
+
+    <section id="auth">
+        <div class="row">
+            <input id="email" type="email" placeholder="email">
+            <input id="password" type="password" placeholder="password (8+ chars, letter + digit)">
+            <input id="name" placeholder="display name (register only)">
+        </div>
+        <div class="row">
+            <button id="register">Register</button>
+            <button id="login">Log in</button>
+        </div>
+        <div id="authStatus" class="meta"></div>
+    </section>
+
+    <section id="chat" class="hidden">
+        <div class="row">
+            <select id="rooms"></select>
+            <input id="newRoom" placeholder="new room name">
+            <button id="createRoom">Create room</button>
+            <input id="invite" type="email" placeholder="invite by email">
+            <button id="inviteBtn">Invite</button>
+        </div>
+        <div id="log"></div>
+        <div class="row" style="margin-top:8px">
+            <input id="text" placeholder="Type a message" maxlength="2000">
+            <button id="send">Send</button>
+        </div>
+        <div id="status" class="meta"></div>
+    </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+<script>
+    const $ = id => document.getElementById(id);
+    let token = null, client = null, subscription = null, roomId = null;
+
+    async function api(path, method = 'GET', body) {
+        const res = await fetch(path, {
+            method,
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+            body: body ? JSON.stringify(body) : undefined
+        });
+        const data = res.status === 204 ? null : await res.json();
+        if (!res.ok) throw new Error(data?.detail || res.statusText);
+        return data;
+    }
+
+    function show(msg) {
+        const div = document.createElement('div');
+        div.className = 'msg';
+        const who = document.createElement('span');
+        who.className = 'who';
+        who.textContent = msg.senderName + ': ';
+        const text = document.createElement('span');
+        text.textContent = msg.content;  // textContent: never interpret user input as HTML
+        const meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = '  ' + new Date(msg.createdAt).toLocaleTimeString();
+        div.append(who, text, meta);
+        $('log').append(div);
+        $('log').scrollTop = $('log').scrollHeight;
+    }
+
+    async function openRoom(id) {
+        roomId = id;
+        $('log').innerHTML = '';
+        const page = await api(`/api/rooms/${id}/messages?limit=50`);
+        page.messages.reverse().forEach(show);
+        subscription?.unsubscribe();
+        subscription = client.subscribe(`/topic/rooms/${id}`, frame => show(JSON.parse(frame.body)));
+    }
+
+    async function loadRooms(selectId) {
+        const rooms = await api('/api/rooms');
+        $('rooms').innerHTML = '';
+        rooms.forEach(r => $('rooms').append(new Option(r.name, r.id)));
+        if (rooms.length) { $('rooms').value = selectId || rooms[0].id; await openRoom($('rooms').value); }
+    }
+
+    function connect() {
+        client = new StompJs.Client({
+            brokerURL: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`,
+            connectHeaders: { Authorization: 'Bearer ' + token },
+            reconnectDelay: 3000,
+            onConnect: () => {
+                $('status').textContent = 'Connected';
+                client.subscribe('/user/queue/errors', f => $('status').textContent = 'Error: ' + JSON.parse(f.body).message);
+                loadRooms();
+            },
+            onStompError: f => $('status').textContent = 'Error: ' + f.headers.message,
+            onWebSocketClose: () => $('status').textContent = 'Disconnected, retrying…'
+        });
+        client.activate();
+    }
+
+    $('register').onclick = async () => {
+        try {
+            await api('/api/auth/register', 'POST', { email: $('email').value, password: $('password').value, displayName: $('name').value });
+            $('authStatus').textContent = 'Registered, now log in.';
+        } catch (e) { $('authStatus').textContent = e.message; }
+    };
+    $('login').onclick = async () => {
+        try {
+            token = (await api('/api/auth/login', 'POST', { email: $('email').value, password: $('password').value })).accessToken;
+            $('auth').classList.add('hidden');
+            $('chat').classList.remove('hidden');
+            connect();
+        } catch (e) { $('authStatus').textContent = e.message; }
+    };
+    $('createRoom').onclick = async () => {
+        const room = await api('/api/rooms', 'POST', { name: $('newRoom').value, memberEmails: [] });
+        $('newRoom').value = '';
+        await loadRooms(room.id);
+    };
+    $('inviteBtn').onclick = async () => {
+        try { await api(`/api/rooms/${roomId}/members`, 'POST', { email: $('invite').value }); $('invite').value = ''; }
+        catch (e) { $('status').textContent = e.message; }
+    };
+    $('rooms').onchange = e => openRoom(e.target.value);
+    const send = () => {
+        if (!$('text').value.trim() || !roomId) return;
+        client.publish({ destination: `/app/rooms/${roomId}/send`, body: JSON.stringify({ content: $('text').value }) });
+        $('text').value = '';
+    };
+    $('send').onclick = send;
+    $('text').onkeydown = e => { if (e.key === 'Enter') send(); };
+</script>
+</body>
+</html>
