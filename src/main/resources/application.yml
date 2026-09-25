@@ -16,6 +16,8 @@ app:
       secret: ${JWT_SECRET:ZGV2LW9ubHktc2VjcmV0LWNoYW5nZS1tZS1pbi1wcm9kdWN0aW9uLTEyMzQ1Njc4OTA=}
       issuer: realtime-chat
       expiration: ${JWT_EXPIRATION:12h}
+  websocket:
+    allowed-origins: ${WS_ALLOWED_ORIGINS:http://localhost:*}
 
 management:
   endpoints:
