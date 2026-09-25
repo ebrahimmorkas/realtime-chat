@@ -1,18 +1,19 @@
-package com.ebrahimmorkas.chat.message;
+package com.ebrahimmorkas.chat.fanout;
 
+import com.ebrahimmorkas.chat.message.MessageBroadcaster;
+import com.ebrahimmorkas.chat.message.MessageResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
-/** Delivers to clients connected to this instance only. */
+/** Pushes a message to the WebSocket clients connected to <em>this</em> instance. */
 @Component
 @RequiredArgsConstructor
-public class LocalMessageBroadcaster implements MessageBroadcaster {
+public class LocalDelivery {
 
     private final SimpMessagingTemplate messagingTemplate;
 
-    @Override
-    public void broadcast(MessageResponse message) {
+    public void deliver(MessageResponse message) {
         messagingTemplate.convertAndSend(MessageBroadcaster.roomTopic(message.roomId()), message);
     }
 }
