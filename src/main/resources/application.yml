@@ -4,3 +4,25 @@ server:
 spring:
   application:
     name: realtime-chat
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/chat}
+      auto-index-creation: true
+
+app:
+  security:
+    jwt:
+      # Base64-encoded HMAC key (>= 256 bits). Override JWT_SECRET in every non-local environment.
+      secret: ${JWT_SECRET:ZGV2LW9ubHktc2VjcmV0LWNoYW5nZS1tZS1pbi1wcm9kdWN0aW9uLTEyMzQ1Njc4OTA=}
+      issuer: realtime-chat
+      expiration: ${JWT_EXPIRATION:12h}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
